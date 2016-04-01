@@ -21,6 +21,21 @@ extern crate cgmath;
 
 extern crate image;
 
+extern crate sciter;
+
+use std::any::Any;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
+
+type SciterHost = Rc<sciter::Host>;
+
+struct View {
+    api: &'static sciter::ISciterAPI,
+    hwnd: sciter::types::HWINDOW,
+}
+
+
+
 use std::io::Cursor;
 pub use gfx::format::{Srgba8, Depth, Rgba8};
 
@@ -80,6 +95,8 @@ fn load_cubemap<R, F>(factory: &mut F, data: CubemapData) -> Result<gfx::handle:
 struct App<R: gfx::Resources>{
     bundle: pipe::Bundle<R>,
     projection: cgmath::Matrix4<f32>,
+    speed: Rc<Cell<f32>>,
+    view: Option<View>,
 }
 
 impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
@@ -134,6 +151,8 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         App {
             bundle: pipe::bundle(slice, pso, data),
             projection: proj,
+            view: None,
+            speed: Rc::new(Cell::new(0.25)),
         }
     }
 
@@ -141,7 +160,7 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         {
             use cgmath::{AffineMatrix3, SquareMatrix, Transform, Vector3, Point3};
             // Update camera position
-            let time = time::precise_time_s() as f32 * 0.25;
+            let time = time::precise_time_s() as f32 * self.speed.get();
             let x = time.sin();
             let z = time.cos();
 
@@ -161,6 +180,76 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         encoder.clear(&self.bundle.data.out, [0.3, 0.3, 0.3, 1.0]);
         self.bundle.encode(encoder);
     }
+
+    fn render_post<C: gfx::CommandBuffer<R>>(&mut self, _encoder: &mut gfx::Encoder<R, C>) -> bool {
+      self.render_document();
+      return true;
+    }
+
+    fn setup<WindowHost: Any>(&mut self, host: &WindowHost) {
+
+      let any = host as &Any;
+      if !any.is::<SciterHost>() {
+        return;
+      }
+      let host = any.downcast_ref::<SciterHost>().unwrap();
+
+      // load UI from html
+      let ui = include_bytes!("facade.htm");
+      host.load_html(ui, None);
+
+      // attach root handler
+      if let Some(root) = host.get_root() {
+        println!("document loaded: {}", root);
+
+        let api: &'static sciter::ISciterAPI = sciter::SciterAPI();
+        self.view = Some(View { api: api, hwnd: host.get_hwnd() });
+
+        let handler = Handler { host: Rc::downgrade(&host.clone()), speed: self.speed.clone() };
+        host.attach_handler(handler);
+
+      } else {
+        println!("oops: no root element!");
+      }
+    }
+}
+
+
+
+impl<R: gfx::Resources> App<R> {
+
+  fn render_document(&mut self) {
+    if self.view.is_none() {
+      return;
+    }
+    use sciter::types::BOOL;
+    let view = self.view.as_ref().unwrap();
+    let el = 0 as sciter::HELEMENT;
+    (view.api.SciterRenderOnDirectXWindow)(view.hwnd, el, false as BOOL);
+    // assert_eq!(ok, 1);
+  }
+}
+
+#[allow(dead_code)]
+struct Handler {
+  host: Weak<sciter::Host>,
+  speed: Rc<Cell<f32>>,
+}
+
+impl sciter::EventHandler for Handler {
+
+  #[allow(unused_variables)]
+  fn on_script_call(&mut self, root: sciter::HELEMENT, name: &str, args: &[sciter::Value]) -> Option<sciter::Value> {
+    let ok = sciter::Value::from(true);
+    match name {
+      "setSpeed" => {
+        let id = args[0].to_float().unwrap();
+        self.speed.set(id as f32);
+        Some(ok)
+      },
+      _ => None,
+    }
+  }
 }
 
 pub fn main() {
