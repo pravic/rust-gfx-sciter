@@ -1,0 +1,44 @@
+[package]
+name = "gfx_sciter_examples"
+version = "0.1.0"
+description = "GFX examples with Sciter UI."
+authors = ["pravic <ehysta@gmail.com>"]
+
+repository = "https://github.com/pravic/rust-gfx-sciter"
+readme = "README.md"
+
+build = "build.rs"
+
+[dependencies]
+user32-sys = "0.1"
+time = "0.1"
+
+gfx = { path = "../gfx/src/render", version = "*" }
+gfx_app = { path="../gfx", branch="sciter-window", version="*" }
+sciter-rs = { git="https://github.com/pravic/rust-sciter", version="*" }
+
+[dev_dependencies]
+log = "0.3"
+cgmath = "0.7"
+gfx_gl = "0.1"
+rand = "0.3"
+genmesh = "0.4"
+noise = "0.1"
+image = "0.6"
+
+
+[[example]]
+name = "blend"
+path = "examples/blend/main.rs"
+
+[[example]]
+name = "deferred"
+path = "examples/deferred/main.rs"
+
+[[example]]
+name = "skybox"
+path = "examples/skybox/main.rs"
+
+[[example]]
+name = "triangle"
+path = "examples/triangle/main.rs"
