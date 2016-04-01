@@ -16,6 +16,8 @@
 
 # [Rust GFX](https://github.com/gfx-rs/gfx) examples with [Sciter UI](https://github.com/pravic/rust-sciter).
 
+Note that build requires a [dxgi+sciter](https://github.com/pravic/rust-gfx/tree/sciter-window) branch of [gfx-rs](https://github.com/gfx-rs/gfx).
+
 ## Screenshots
 
 ![Blending Example](examples/blend/blend.png)
