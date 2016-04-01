@@ -15,6 +15,13 @@
 #[macro_use]
 extern crate gfx;
 extern crate gfx_app;
+extern crate sciter;
+
+use std::rc::Rc;
+use std::any::Any;
+
+type SciterHost = Rc<sciter::Host>;
+
 
 
 gfx_vertex_struct!( Vertex {
@@ -27,10 +34,19 @@ gfx_pipeline!(pipe {
     out: gfx::RenderTarget<gfx::format::Srgba8> = "Target0",
 });
 
+
+struct View {
+    api: &'static sciter::ISciterAPI,
+    hwnd: sciter::types::HWINDOW,
+    background: sciter::Element,
+    foreground: sciter::Element,
+}
+
 struct App<R: gfx::Resources> {
     pso: gfx::PipelineState<R, pipe::Meta>,
     data: pipe::Data<R>,
     slice: gfx::Slice<R>,
+    view: Option<View>,
 }
 
 impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
@@ -69,16 +85,113 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
                 out: init.color,
             },
             slice: slice,
+            view: Default::default(),
         }
     }
 
-    fn render<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) {
-        encoder.clear(&self.data.out, [0.1, 0.2, 0.3, 1.0]);
-        encoder.draw(&self.slice, &self.pso, &self.data);
+    fn setup<WindowHost: Any>(&mut self, host: &WindowHost) {
+
+      let any = host as &Any;
+      if !any.is::<SciterHost>() {
+        return;
+      }
+      let host = any.downcast_ref::<SciterHost>().unwrap();
+
+      // load UI from html
+      let ui = include_bytes!("facade.htm");
+      host.load_html(ui, None);
+
+      // attach root handler
+      if let Some(root) = host.get_root() {
+        println!("document loaded: {}", root);
+        let bg = root.find_first("section#back-layer");
+        let fg = root.find_first("section#fore-layer");
+
+        if bg.is_ok() && fg.is_ok() {
+          let api: &'static sciter::ISciterAPI = sciter::SciterAPI();
+          self.view = Some(View { api: api, hwnd: host.get_hwnd(), background: bg.unwrap().unwrap(), foreground: fg.unwrap().unwrap() });
+        }
+
+        let handler = Handler { host: Rc::downgrade(&host.clone()) };
+        host.attach_handler(handler);
+
+      } else {
+        println!("oops: no root element!");
+      }
     }
+
+    fn render_pre<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) -> bool {
+      encoder.clear(&self.data.out, [0.1, 0.2, 0.3, 1.0]);
+      return true;
+    }
+
+    fn render<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) {
+      self.render_layer(false);
+      encoder.draw(&self.slice, &self.pso, &self.data);
+    }
+
+    fn render_post<C: gfx::CommandBuffer<R>>(&mut self, _encoder: &mut gfx::Encoder<R, C>) -> bool {
+      self.render_layer(true);
+      return true;
+    }
+
+}
+
+impl<R: gfx::Resources> App<R> {
+
+  #[allow(dead_code)]
+  fn render_document(&mut self) {
+    if self.view.is_none() {
+      println!("wat??");
+      return;
+    }
+    use sciter::types::BOOL;
+    let view = self.view.as_ref().unwrap();
+    let el = 0 as sciter::HELEMENT;
+    let ok = (view.api.SciterRenderOnDirectXWindow)(view.hwnd, el, false as BOOL);
+    assert_eq!(ok, 1);
+  }
+
+  fn render_layer(&mut self, foreground: bool) {
+    if self.view.is_none() {
+      return;
+    }
+    use sciter::types::BOOL;
+    let view = self.view.as_ref().unwrap();
+    let ok = if foreground == false {
+      (view.api.SciterRenderOnDirectXWindow)(view.hwnd, view.background.as_ptr(), false as BOOL)
+    } else {
+      (view.api.SciterRenderOnDirectXWindow)(view.hwnd, view.foreground.as_ptr(), true as BOOL)
+    };
+    assert_eq!(ok, 1);
+  }
+
+}
+
+#[allow(dead_code)]
+struct Handler {
+  host: ::std::rc::Weak<sciter::Host>,
+}
+
+impl sciter::EventHandler for Handler {
+
+  #[allow(unused_variables)]
+  fn on_script_call(&mut self, root: sciter::HELEMENT, name: &str, args: &[sciter::Value]) -> Option<sciter::Value> {
+    use sciter::Value;
+
+    let args = args.iter().map(|ref x| format!("{}", &x)).collect::<Vec<String>>().join(", ");
+    println!("script->native: {}({}), root {:?}", name, args, root);
+
+    let ok = Value::from(true);
+    match name {
+      "setRotationSpeed" => Some(ok),
+      "setColorSpeed" => Some(ok),
+      _ => None,
+    }
+  }
 }
 
 pub fn main() {
-    use gfx_app::Application;
-    App::launch_default("Triangle example");
+  use gfx_app::Application;
+  App::launch_default("Sciter DirectX sample");
 }
