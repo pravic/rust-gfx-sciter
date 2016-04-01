@@ -29,13 +29,27 @@
 extern crate cgmath;
 #[macro_use]
 extern crate gfx;
-extern crate gfx_window_glutin;
-extern crate glutin;
 extern crate gfx_app;
 extern crate time;
 extern crate rand;
 extern crate genmesh;
 extern crate noise;
+
+
+
+extern crate sciter;
+
+use std::any::Any;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
+
+type SciterHost = Rc<sciter::Host>;
+
+struct View {
+    api: &'static sciter::ISciterAPI,
+    hwnd: sciter::types::HWINDOW,
+}
+
 
 use rand::Rng;
 use cgmath::{SquareMatrix, Matrix4, Point3, Vector3, EuclideanVector, deg};
@@ -375,7 +389,10 @@ struct App<R: gfx::Resources> {
     intermediate: ViewPair<R, GFormat>,
     light_pos_vec: Vec<LightInfo>,
     seed: Seed,
-    debug_buf: Option<gfx::handle::ShaderResourceView<R, [f32; 4]>>,
+    // debug_buf: Option<gfx::handle::ShaderResourceView<R, [f32; 4]>>,
+    debug_buffers: Vec<Option<gfx::handle::ShaderResourceView<R, [f32; 4]>>>,
+    buf_num: Rc<Cell<u8>>,
+    view: Option<View>,
 }
 
 impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
@@ -596,6 +613,8 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
             emitter::bundle(light_slice, pso, data)
         };
 
+        let buffers = vec![None, Some(gpos.resource.clone()), Some(gnormal.resource.clone()), Some(gdiffuse.resource.clone())];
+
         App {
             terrain: terrain,
             blit: blit,
@@ -606,22 +625,12 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
                 LightInfo{ pos: [0.0, 0.0, 0.0, 0.0] }
             }).collect(),
             seed: seed,
-            debug_buf: None,
+            // debug_buf: None,
+            debug_buffers: buffers,
+            buf_num: Rc::new(Cell::new(0)),
+            view: None,
         }
     }
-
-    /*fn update(&mut self) {
-        Event::KeyboardInput(_, _, Some(VirtualKeyCode::Key1)) =>
-            debug_buf = Some(gpos.resource.clone()),
-        Event::KeyboardInput(_, _, Some(VirtualKeyCode::Key2)) =>
-            debug_buf = Some(gnormal.resource.clone()),
-        Event::KeyboardInput(_, _, Some(VirtualKeyCode::Key3)) =>
-            debug_buf = Some(gdiffuse.resource.clone()),
-        Event::KeyboardInput(_, _, Some(VirtualKeyCode::Key4)) =>
-            debug_buf = Some(depth_resource.clone()),
-        Event::KeyboardInput(_, _, Some(VirtualKeyCode::Key0)) =>
-            debug_buf = None,
-    }*/
 
     fn render<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) {
         let time = precise_time_s() as f32;
@@ -686,7 +695,8 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         // Render the terrain to the geometry buffer
         self.terrain.encode(encoder);
 
-        let blit_tex = match self.debug_buf {
+        let buf_num = self.buf_num.get() as usize;
+        let blit_tex = match self.debug_buffers[buf_num] {
             Some(ref tex) => tex,   // Show one of the immediate buffers
             None => {
                 encoder.clear(&self.intermediate.target, [0.0, 0.0, 0.0, 1.0]);
@@ -701,6 +711,78 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
         // Show the result
         self.blit.encode(encoder);
     }
+
+    fn render_post<C: gfx::CommandBuffer<R>>(&mut self, _encoder: &mut gfx::Encoder<R, C>) -> bool {
+      self.render_document();
+      return true;
+    }
+
+    fn setup<WindowHost: Any>(&mut self, host: &WindowHost) {
+
+      let any = host as &Any;
+      if !any.is::<SciterHost>() {
+        return;
+      }
+      let host = any.downcast_ref::<SciterHost>().unwrap();
+
+      // load UI from html
+      let ui = include_bytes!("facade.htm");
+      host.load_html(ui, None);
+
+      // attach root handler
+      if let Some(root) = host.get_root() {
+        println!("document loaded: {}", root);
+
+        let api: &'static sciter::ISciterAPI = sciter::SciterAPI();
+        self.view = Some(View { api: api, hwnd: host.get_hwnd() });
+
+        let handler = Handler { host: Rc::downgrade(&host.clone()), buf_num: self.buf_num.clone() };
+        host.attach_handler(handler);
+
+        let blends: sciter::Value = ["none", "gpos", "gnormal", "gdiffuse"].iter().cloned().collect();
+        root.call_function("setupBlending", &[blends]).ok();
+
+      } else {
+        println!("oops: no root element!");
+      }
+    }
+}
+
+
+impl<R: gfx::Resources> App<R> {
+
+  fn render_document(&mut self) {
+    if self.view.is_none() {
+      return;
+    }
+    use sciter::types::BOOL;
+    let view = self.view.as_ref().unwrap();
+    let el = 0 as sciter::HELEMENT;
+    (view.api.SciterRenderOnDirectXWindow)(view.hwnd, el, false as BOOL);
+    // assert_eq!(ok, 1);
+  }
+}
+
+#[allow(dead_code)]
+struct Handler {
+  host: Weak<sciter::Host>,
+  buf_num: Rc<Cell<u8>>,
+}
+
+impl sciter::EventHandler for Handler {
+
+  #[allow(unused_variables)]
+  fn on_script_call(&mut self, root: sciter::HELEMENT, name: &str, args: &[sciter::Value]) -> Option<sciter::Value> {
+    let ok = sciter::Value::from(true);
+    match name {
+      "setBlending" => {
+        let id = args[0].to_int().unwrap();
+        self.buf_num.set(id as u8);
+        Some(ok)
+      },
+      _ => None,
+    }
+  }
 }
 
 pub fn main() {
