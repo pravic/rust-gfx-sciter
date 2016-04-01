@@ -14,7 +14,7 @@
 	limitations under the License.
 -->
 
-# Rust GFX examples with Sciter UI.
+# [Rust GFX](https://github.com/gfx-rs/gfx) examples with [Sciter UI](https://github.com/pravic/rust-sciter).
 
 ## Screenshots
 
