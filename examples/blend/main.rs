@@ -17,6 +17,21 @@ extern crate gfx;
 extern crate gfx_app;
 extern crate image;
 
+extern crate sciter;
+
+use std::any::Any;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
+
+type SciterHost = Rc<sciter::Host>;
+
+struct View {
+    api: &'static sciter::ISciterAPI,
+    hwnd: sciter::types::HWINDOW,
+}
+
+
+
 pub use gfx::format::{Rgba8, Srgba8, DepthStencil};
 
 gfx_vertex_struct!( Vertex {
@@ -72,7 +87,8 @@ const BLENDS: [&'static str; 9] = [
 
 struct App<R: gfx::Resources>{
     bundle: pipe::Bundle<R>,
-    id: u8,
+    id: Rc<Cell<u8>>,
+    view: Option<View>,
 }
 
 impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
@@ -134,25 +150,90 @@ impl<R: gfx::Resources> gfx_app::Application<R> for App<R> {
 
         App {
             bundle: pipe::bundle(slice, pso, data),
-            id: 0,
+            id: Rc::new(Cell::new(0)),
+            view: None,
         }
     }
 
-    //fn update() {
-    // glutin::Event::KeyboardInput(glutin::ElementState::Pressed, _, Some(glutin::VirtualKeyCode::B)) => {
-    //                let blend_func = blends_cycle.next().unwrap();
-    //                println!("Using '{}' blend equation", blend_func.1);
-    //                data.blend = blend_func.0;
-    //            },
-    //
-    //}
+    fn setup<WindowHost: Any>(&mut self, host: &WindowHost) {
+
+      let any = host as &Any;
+      if !any.is::<SciterHost>() {
+        return;
+      }
+      let host = any.downcast_ref::<SciterHost>().unwrap();
+
+      // load UI from html
+      let ui = include_bytes!("facade.htm");
+      host.load_html(ui, None);
+
+      // attach root handler
+      if let Some(root) = host.get_root() {
+        println!("document loaded: {}", root);
+
+        let api: &'static sciter::ISciterAPI = sciter::SciterAPI();
+        self.view = Some(View { api: api, hwnd: host.get_hwnd() });
+
+        let handler = Handler { host: Rc::downgrade(&host.clone()), blend: self.id.clone() };
+        host.attach_handler(handler);
+
+        let blends: sciter::Value = BLENDS.iter().cloned().collect();
+        root.call_function("setupBlending", &[blends]).ok();
+
+      } else {
+        println!("oops: no root element!");
+      }
+    }
 
     fn render<C: gfx::CommandBuffer<R>>(&mut self, encoder: &mut gfx::Encoder<R, C>) {
-        let locals = Locals { blend: self.id as i32 };
-        encoder.update_constant_buffer(&self.bundle.data.locals, &locals);
-        encoder.clear(&self.bundle.data.out, [0.0; 4]);
-        self.bundle.encode(encoder);
+      let locals = Locals { blend: self.id.get() as i32 };
+      encoder.update_constant_buffer(&self.bundle.data.locals, &locals);
+      encoder.clear(&self.bundle.data.out, [0.0; 4]);
+      self.bundle.encode(encoder);
     }
+
+    fn render_post<C: gfx::CommandBuffer<R>>(&mut self, _encoder: &mut gfx::Encoder<R, C>) -> bool {
+      self.render_document();
+      return true;
+    }
+}
+
+impl<R: gfx::Resources> App<R> {
+
+  fn render_document(&mut self) {
+    if self.view.is_none() {
+      return;
+    }
+    use sciter::types::BOOL;
+    let view = self.view.as_ref().unwrap();
+    let el = 0 as sciter::HELEMENT;
+    (view.api.SciterRenderOnDirectXWindow)(view.hwnd, el, false as BOOL);
+    // assert_eq!(ok, 1);
+  }
+
+}
+
+#[allow(dead_code)]
+struct Handler {
+  host: Weak<sciter::Host>,
+  blend: Rc<Cell<u8>>,
+}
+
+impl sciter::EventHandler for Handler {
+
+  #[allow(unused_variables)]
+  fn on_script_call(&mut self, root: sciter::HELEMENT, name: &str, args: &[sciter::Value]) -> Option<sciter::Value> {
+    let ok = sciter::Value::from(true);
+    match name {
+      "setBlending" => {
+        let id = args[0].to_int().unwrap();
+        println!("Using '{}' blend equation", BLENDS[id as usize]);
+        self.blend.set(id as u8);
+        Some(ok)
+      },
+      _ => None,
+    }
+  }
 }
 
 pub fn main() {

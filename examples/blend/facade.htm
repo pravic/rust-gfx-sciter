@@ -1,0 +1,127 @@
+<html>
+  <head>
+    <title>Sciter, DirectX and Rust!</title>
+    <style>
+
+    html { background: transparent; }
+
+    body {
+      size:*;
+      overflow:auto;
+      flow:stack;
+      margin:0;
+    }
+
+    body > section
+    {
+      size:*; /* sections spans whole window surface */
+    }
+
+    body > section#back-layer
+    {
+      background: radial-gradient(75% 75%, circle farthest-side, white, orange, rgb(0,0,204));
+      color:#fff;
+      overflow:hidden;
+      padding:10dip;
+      opacity: 0.20;
+    }
+
+    body > section#back-layer > h1:hover
+    {
+      color: red;
+    }
+
+    section#fore-layer
+    {
+      font:system;
+      background-color: rgba(140,140,140,0.7);
+      width:200dip;
+      height:*;
+      margin-left:*; /*attached to the right side*/
+      padding:10dip;
+      border-left: rgba(240,240,240,0.5) solid 1dip;
+      transform: translate(95%, 0);
+    }
+    section#fore-layer:hover
+    {
+      transform: translate(0%, 0);
+      transition: transform(quad-out, 300ms, 200ms); /*300ms transition, 200ms delay to start */
+    }
+
+    section#fore-layer > p
+    {
+      background:rgba(255,255,255,0.8);
+      padding:0.5em 1em;
+      border-radius: 4dip;
+    }
+
+    form
+    {
+      flow:row(label,input); /*organized in table having one <label> and one <input> per row */
+    }
+
+    input:empty { color: gray; }
+
+
+    </style>
+    <script type="text/tiscript">
+
+      $(button#close).on("click", :: view.close());
+
+      $(input#opacity).on("change", : {
+      	$(section#back-layer).style["opacity"] = this.value;
+      });
+      $(input#blending).on("change", : {
+      	var list = $(select);
+   			list.value = this.value;
+      	try {
+        	view.setBlending(this.value);
+      	} catch(e) {
+      		stderr.println(e);
+      	}
+      });
+      $(select).on("change", : e {
+      	stdout.printf("%s, %s\n", this, this.value);
+      });
+      $(input#caption).on("change", : {
+         view.caption = this.value;
+      });
+
+      function setupBlending(blends) {
+      	var list = $(select);
+      	list.options.clear();
+      	for (var (i,v) in blends) {
+      		list.options.$append(<option value="{i}">{v}</option>);
+      	}
+      	if(blends.length > 0) {
+      		$(select).value = 0;
+	      	$(#blending).sliderRange(0, blends.length - 1);
+      	}
+      }
+
+      setupBlending(["One", "Two", "Three", "4", "5"]);
+
+    </script>
+  </head>
+<body>
+  <section id="fore-layer">
+    <p>
+    	Blending operations
+    	<button #close>Quit</button>
+    </p>
+    <form>
+      <label>opacity:</label><input disabled id="opacity" type="hslider" value=0.2 min=0.0 max=1.0 step=0.01 />
+      <label>blending:</label><input id="blending" type="hslider" value=0 min=0 step=1 max=10 />
+    </form>
+    <hr />
+    <input|text#caption novalue="window caption">
+    <hr />
+    <select>
+      <option>First</option>
+      <option>Second</option>
+      <option>Third</option>
+    </select>
+  </section>
+
+</body>
+</html>
